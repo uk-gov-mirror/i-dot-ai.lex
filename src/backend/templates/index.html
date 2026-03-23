@@ -1573,20 +1573,22 @@ claude mcp remove lex</pre>
                             <h3 class="govuk-heading-m">Lex UK Law Skill</h3>
                             <p class="govuk-body">Install the Lex UK Law skill for automatic legal research guidance. Skills work across Claude Code, Claude Desktop, and claude.ai.</p>
 
-                            <h4 class="govuk-heading-s">Claude Code</h4>
-                            <p class="govuk-body-s">Run these commands in Claude Code:</p>
+                            <h4 class="govuk-heading-s">Claude Code (Plugin)</h4>
+                            <p class="govuk-body-s">Install as a plugin from GitHub:</p>
 
                             <div class="code-block">
-                                <pre id="skill-install"># Add the marketplace
+                                <pre id="skill-install"># Add the Lex plugin marketplace
 /plugin marketplace add i-dot-ai/lex
 
-# Install the skill
-/plugin install lex-uk-law</pre>
+# Install the skill plugin
+/plugin install lex-uk-law@i-dot-ai-lex</pre>
                                 <button class="copy-button" onclick="copyToClipboard('skill-install')" aria-label="Copy skill install commands to clipboard">Copy</button>
                             </div>
 
+                            <p class="govuk-body-s" style="margin-top: 12px;">Alternatively, if you've cloned the repo, the skill is already at <code>.claude/skills/lex-uk-law/SKILL.md</code> and activates automatically.</p>
+
                             <h4 class="govuk-heading-s">Claude Desktop / claude.ai</h4>
-                            <p class="govuk-body-s">Download the skill and upload via Settings → Capabilities → Upload skill:</p>
+                            <p class="govuk-body-s">Download the skill file and add it manually:</p>
                             <a href="/static/lex-uk-law-skill.zip"
                                class="govuk-button govuk-button--secondary"
                                download>
