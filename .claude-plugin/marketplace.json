@@ -1,5 +1,5 @@
 {
-  "name": "i-dot-ai/lex",
+  "name": "lex",
   "owner": {
     "name": "Incubator for AI (i.AI), DSIT",
     "email": "lex@dsit.gov.uk"
@@ -8,9 +8,11 @@
     {
       "name": "lex-uk-law",
       "description": "UK legal research skill — search legislation, amendments, explanatory notes, and legal provisions via the Lex API. Use whenever you need to research UK law, look up specific Acts or sections, check amendment histories, or understand how legislation has changed over time.",
-      "source": ".",
       "version": "1.1.0",
-      "author": "i.AI"
+      "author": {
+        "name": "i.AI (Incubator for Artificial Intelligence), DSIT"
+      },
+      "source": "./"
     }
   ]
 }
