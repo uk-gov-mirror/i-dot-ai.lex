@@ -1,6 +1,6 @@
 import { createAzure } from '@ai-sdk/azure';
 import { createMCPClient } from '@ai-sdk/mcp';
-import { streamText, convertToModelMessages } from 'ai';
+import { streamText, convertToModelMessages, stepCountIs } from 'ai';
 import { after } from 'next/server';
 import { langfuseSpanProcessor } from '../../../../../instrumentation';
 import { buildResearchSystemPrompt } from '@/lib/research-prompt';
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
       system: SYSTEM_PROMPT,
       messages: await convertToModelMessages(messages),
       tools,
-      maxSteps,
+      stopWhen: stepCountIs(maxSteps),
       experimental_telemetry: {
         isEnabled: true,
         functionId: 'research-chat',
@@ -68,13 +68,7 @@ export async function POST(req: Request) {
           reasoningSummary: 'detailed',
         },
       },
-      async onFinish({ steps }) {
-        // Debug: log tool result shapes to understand MCP output format
-        for (const step of steps) {
-          for (const result of step.toolResults) {
-            console.log(`[TOOL DEBUG] ${result.toolName}:`, JSON.stringify(result.result).slice(0, 500));
-          }
-        }
+      async onFinish() {
         await mcpClient?.close();
       },
       onError({ error }) {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport } from "ai"
 import { Streamdown } from "streamdown"
@@ -179,6 +179,12 @@ export default function ResearchPage() {
 
   const { messages, sendMessage, status } = useChat({ transport })
 
+  // Auto-scroll to latest message
+  const chatEndRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
   // Load maxSteps from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem(RESEARCH_SETTINGS_KEY)
@@ -222,7 +228,7 @@ export default function ResearchPage() {
           </div>
         </header>
 
-        <div className="flex flex-1 flex-col px-6">
+        <main className="flex flex-1 flex-col px-6">
           {/* Show input box when no messages, show chat when messages exist */}
           {messages.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center">
@@ -236,7 +242,7 @@ export default function ResearchPage() {
                         <textarea
                           id="research-query"
                           placeholder="e.g. How has data protection law changed since GDPR?"
-                          className="w-full min-h-[100px] px-6 pt-5 pb-12 text-base bg-transparent resize-none focus-visible:outline-none"
+                          className="w-full min-h-[100px] px-6 pt-5 pb-12 text-base bg-transparent resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                           value={input}
                           onChange={(e) => setInput(e.target.value)}
                           onKeyDown={(e) => {
@@ -322,11 +328,13 @@ export default function ResearchPage() {
                               <span className="text-xs text-muted-foreground">{maxSteps} steps max</span>
                             </div>
                             <input
+                              id="research-depth"
                               type="range"
                               min={RESEARCH_DEFAULTS.MAX_STEPS_MIN}
                               max={RESEARCH_DEFAULTS.MAX_STEPS_MAX}
                               value={maxSteps}
                               onChange={(e) => setMaxSteps(parseInt(e.target.value))}
+                              aria-label="Research depth"
                               className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
                             />
                             <p className="text-xs text-muted-foreground">
@@ -590,6 +598,7 @@ export default function ResearchPage() {
                     </div>
                   </div>
                 )}
+                <div ref={chatEndRef} />
               </div>
 
               {/* Sticky input at bottom */}
@@ -598,7 +607,7 @@ export default function ResearchPage() {
                   <div className="relative rounded-[2rem] border border-input/50 bg-background shadow-lg overflow-hidden">
                     <textarea
                       placeholder="Ask a follow-up question..."
-                      className="w-full h-[48px] px-6 pt-[14px] pb-[14px] pr-14 text-base leading-5 bg-transparent resize-none focus-visible:outline-none"
+                      className="w-full h-[48px] px-6 pt-[14px] pb-[14px] pr-14 text-base leading-5 bg-transparent resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -635,7 +644,7 @@ export default function ResearchPage() {
               </div>
             </div>
           )}
-        </div>
+        </main>
       </SidebarInset>
     </SidebarProvider>
   )
