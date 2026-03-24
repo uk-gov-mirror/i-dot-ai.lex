@@ -386,6 +386,10 @@ resource exportJob 'Microsoft.App/jobs@2024-03-01' = {
           name: 'storage-connection-string'
           value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};AccountKey=${storageAccount.listKeys().keys[0].value};EndpointSuffix=core.windows.net'
         }
+        {
+          name: 'slack-webhook-url'
+          value: slackWebhookUrl
+        }
       ]
     }
     template: {
@@ -431,6 +435,10 @@ resource exportJob 'Microsoft.App/jobs@2024-03-01' = {
               name: 'DOWNLOADS_BASE_URL'
               value: 'https://${storageAccount.name}.blob.core.windows.net/downloads'
             }
+            {
+              name: 'SLACK_WEBHOOK_URL'
+              secretRef: 'slack-webhook-url'
+            }
           ]
         }
       ]
@@ -452,7 +460,7 @@ resource ingestJob 'Microsoft.App/jobs@2024-03-01' = {
         replicaCompletionCount: 1
       }
       replicaTimeout: 28800  // 8 hour timeout
-      replicaRetryLimit: 1
+      replicaRetryLimit: 2
       registries: [
         {
           server: acr.properties.loginServer
@@ -476,6 +484,10 @@ resource ingestJob 'Microsoft.App/jobs@2024-03-01' = {
         {
           name: 'azure-openai-api-key'
           value: azureOpenAIApiKey
+        }
+        {
+          name: 'slack-webhook-url'
+          value: slackWebhookUrl
         }
       ]
     }
@@ -514,6 +526,10 @@ resource ingestJob 'Microsoft.App/jobs@2024-03-01' = {
               name: 'AZURE_OPENAI_EMBEDDING_MODEL'
               value: azureOpenAIEmbeddingModel
             }
+            {
+              name: 'SLACK_WEBHOOK_URL'
+              secretRef: 'slack-webhook-url'
+            }
           ]
         }
       ]
@@ -535,7 +551,7 @@ resource weeklyIngestJob 'Microsoft.App/jobs@2024-03-01' = {
         replicaCompletionCount: 1
       }
       replicaTimeout: 86400  // 24 hour timeout
-      replicaRetryLimit: 1
+      replicaRetryLimit: 2
       registries: [
         {
           server: acr.properties.loginServer
@@ -559,6 +575,10 @@ resource weeklyIngestJob 'Microsoft.App/jobs@2024-03-01' = {
         {
           name: 'azure-openai-api-key'
           value: azureOpenAIApiKey
+        }
+        {
+          name: 'slack-webhook-url'
+          value: slackWebhookUrl
         }
       ]
     }
@@ -597,6 +617,10 @@ resource weeklyIngestJob 'Microsoft.App/jobs@2024-03-01' = {
               name: 'AZURE_OPENAI_EMBEDDING_MODEL'
               value: azureOpenAIEmbeddingModel
             }
+            {
+              name: 'SLACK_WEBHOOK_URL'
+              secretRef: 'slack-webhook-url'
+            }
           ]
         }
       ]
@@ -618,7 +642,7 @@ resource monthlyIngestJob 'Microsoft.App/jobs@2024-03-01' = {
         replicaCompletionCount: 1
       }
       replicaTimeout: 604800  // 1 week timeout
-      replicaRetryLimit: 1
+      replicaRetryLimit: 2
       registries: [
         {
           server: acr.properties.loginServer
@@ -642,6 +666,10 @@ resource monthlyIngestJob 'Microsoft.App/jobs@2024-03-01' = {
         {
           name: 'azure-openai-api-key'
           value: azureOpenAIApiKey
+        }
+        {
+          name: 'slack-webhook-url'
+          value: slackWebhookUrl
         }
       ]
     }
@@ -679,6 +707,10 @@ resource monthlyIngestJob 'Microsoft.App/jobs@2024-03-01' = {
             {
               name: 'AZURE_OPENAI_EMBEDDING_MODEL'
               value: azureOpenAIEmbeddingModel
+            }
+            {
+              name: 'SLACK_WEBHOOK_URL'
+              secretRef: 'slack-webhook-url'
             }
           ]
         }
@@ -756,6 +788,73 @@ resource exportStalenessAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15
             | where ContainerAppName_s == 'lex-export-job'
             | where Reason_s == 'Completed'
             | where TimeGenerated > ago(10d)
+            | summarize SuccessCount = count()
+          '''
+          timeAggregation: 'Total'
+          metricMeasureColumn: 'SuccessCount'
+          operator: 'LessThanOrEqual'
+          threshold: 0
+        }
+      ]
+    }
+    actions: {
+      actionGroups: [slackActionGroup.id]
+    }
+  }
+}
+
+resource ingestJobFailureAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = if (!empty(slackWebhookUrl)) {
+  name: '${resourcePrefix}-ingest-job-failure'
+  location: location
+  properties: {
+    displayName: 'Ingest Job Failure'
+    description: 'Fires when any ingest job fails'
+    severity: 2
+    enabled: true
+    autoMitigate: true
+    scopes: [logAnalytics.id]
+    evaluationFrequency: 'PT1H'
+    windowSize: 'PT1H'
+    criteria: {
+      allOf: [
+        {
+          query: '''
+            ContainerAppSystemLogs_CL
+            | where ContainerAppName_s in ('lex-ingest-job', 'lex-weekly-ingest-job', 'lex-monthly-ingest-job')
+            | where Reason_s in ('Failed', 'BackoffLimitExceeded')
+          '''
+          timeAggregation: 'Count'
+          operator: 'GreaterThan'
+          threshold: 0
+        }
+      ]
+    }
+    actions: {
+      actionGroups: [slackActionGroup.id]
+    }
+  }
+}
+
+resource ingestStalenessAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = if (!empty(slackWebhookUrl)) {
+  name: '${resourcePrefix}-ingest-staleness'
+  location: location
+  properties: {
+    displayName: 'Ingest Data Staleness'
+    description: 'No successful daily ingest job completion in the past 3 days'
+    severity: 1
+    enabled: true
+    autoMitigate: false
+    scopes: [logAnalytics.id]
+    evaluationFrequency: 'P1D'
+    windowSize: 'P1D'
+    criteria: {
+      allOf: [
+        {
+          query: '''
+            ContainerAppSystemLogs_CL
+            | where ContainerAppName_s == 'lex-ingest-job'
+            | where Reason_s == 'Completed'
+            | where TimeGenerated > ago(3d)
             | summarize SuccessCount = count()
           '''
           timeAggregation: 'Total'

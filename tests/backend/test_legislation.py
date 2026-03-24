@@ -274,9 +274,9 @@ def test_search_legislation_sections_with_short_format_id_endpoint(client):
                 pytest.fail(f"Validation error: {e}")
 
 
-def test_normalize_legislation_id():
-    """Test the normalize_legislation_id function."""
-    from backend.legislation.search import normalize_legislation_id
+def test_normalise_legislation_id():
+    """Test the normalise_legislation_id function."""
+    from backend.legislation.search import normalise_legislation_id
 
     # Test cases: (input, expected_output)
     test_cases = [
@@ -292,8 +292,8 @@ def test_normalize_legislation_id():
     ]
 
     for input_val, expected in test_cases:
-        result = normalize_legislation_id(input_val)
+        result = normalise_legislation_id(input_val)
         assert result == expected, (
-            f"normalize_legislation_id({repr(input_val)}) returned {repr(result)}, "
+            f"normalise_legislation_id({repr(input_val)}) returned {repr(result)}, "
             f"expected {repr(expected)}"
         )

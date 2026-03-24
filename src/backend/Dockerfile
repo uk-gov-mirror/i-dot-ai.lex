@@ -12,8 +12,8 @@ COPY pyproject.toml uv.lock README.md ./
 # Copy source code
 COPY src/ ./src/
 
-# Copy bulk export script for scheduled job
-COPY scripts/bulk_export_parquet.py ./scripts/
+# Copy scripts for scheduled jobs (export, backfill, etc.)
+COPY scripts/ ./scripts/
 
 # Create non-root user and install dependencies as that user
 RUN useradd -m -u 1001 appuser
