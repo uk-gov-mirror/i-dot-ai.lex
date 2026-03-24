@@ -16,7 +16,7 @@ from lex.settings import (
 
 logger = logging.getLogger(__name__)
 
-_RETRYABLE_TERMS = frozenset(["timed out", "timeout", "connection", "disconnected"])
+_RETRYABLE_TERMS = frozenset(["timed out", "timeout", "connection", "disconnected", "read timed out"])
 
 
 def _with_retry(method, *, max_retries=3, base_backoff=1.0):
@@ -63,7 +63,7 @@ def get_qdrant_client() -> QdrantClient:
         client = QdrantClient(
             url=QDRANT_CLOUD_URL,
             api_key=QDRANT_CLOUD_API_KEY,
-            timeout=360,
+            timeout=600,
         )
         logger.info(f"Connecting to Qdrant Cloud: {QDRANT_CLOUD_URL}")
     else:
@@ -71,7 +71,7 @@ def get_qdrant_client() -> QdrantClient:
             url=QDRANT_HOST,
             port=QDRANT_GRPC_PORT,
             api_key=QDRANT_API_KEY,
-            timeout=360,  # Increased for large document batches (caselaw can be 260K+ chars)
+            timeout=600,
         )
         logger.info(f"Connecting to local Qdrant: {QDRANT_HOST}")
 
@@ -86,9 +86,10 @@ def get_qdrant_client() -> QdrantClient:
                 "mode": mode,
             },
         )
-        # Patch query_points and scroll with retry for transient errors
+        # Patch operations with retry for transient errors
         client.query_points = _with_retry(client.query_points)
         client.scroll = _with_retry(client.scroll)
+        client.upsert = _with_retry(client.upsert, max_retries=5, base_backoff=5.0)
 
         return client
     except Exception as e:
@@ -132,7 +133,7 @@ def get_async_qdrant_client() -> AsyncQdrantClient:
         client = AsyncQdrantClient(
             url=QDRANT_CLOUD_URL,
             api_key=QDRANT_CLOUD_API_KEY,
-            timeout=360,
+            timeout=600,
         )
         logger.info(f"Created async Qdrant Cloud client: {QDRANT_CLOUD_URL}")
     else:
