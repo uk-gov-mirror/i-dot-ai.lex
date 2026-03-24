@@ -38,7 +38,7 @@ from _console import console, print_header, print_summary, setup_logging
 from lex.caselaw.models import Caselaw
 from lex.caselaw.qdrant_schema import get_caselaw_summary_schema
 from lex.core.document import uri_to_uuid
-from lex.core.embeddings import generate_hybrid_embeddings_batch
+from lex.core.embeddings import bm25_document, generate_dense_embeddings_batch
 from lex.core.qdrant_client import get_qdrant_client
 from lex.processing.caselaw_summaries.summary_generator import add_summaries_to_caselaw
 from lex.settings import CASELAW_COLLECTION, CASELAW_SUMMARY_COLLECTION
@@ -128,18 +128,18 @@ def upload_summaries_batch(summaries: list, batch_size: int = 100, dry_run: bool
         texts = [s.get_embedding_text() for s in batch]
 
         try:
-            embeddings = generate_hybrid_embeddings_batch(
+            dense_embeddings = generate_dense_embeddings_batch(
                 texts,
                 progress_callback=lambda n: logger.info(f"Embeddings: {n}/{len(texts)}"),
             )
 
             points = []
-            for summary, (dense, sparse) in zip(batch, embeddings):
+            for summary, text, dense in zip(batch, texts, dense_embeddings):
                 point_id = str(uri_to_uuid(summary.id))
                 points.append(
                     PointStruct(
                         id=point_id,
-                        vector={"dense": dense, "sparse": sparse},
+                        vector={"dense": dense, "sparse": bm25_document(text)},
                         payload=summary.model_dump(mode="json"),
                     )
                 )

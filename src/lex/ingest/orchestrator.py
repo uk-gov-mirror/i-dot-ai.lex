@@ -27,7 +27,7 @@ from lex.caselaw.qdrant_schema import (
     get_caselaw_section_schema,
     get_caselaw_summary_schema,
 )
-from lex.core.embeddings import generate_hybrid_embeddings_batch
+from lex.core.embeddings import bm25_document, generate_dense_embeddings_batch
 from lex.core.qdrant_client import qdrant_client
 from lex.core.utils import create_collection_if_none
 from lex.explanatory_note.pipeline import pipe_explanatory_note
@@ -488,24 +488,24 @@ def _create_points_batch(docs: list) -> list[PointStruct]:
         return []
 
     texts = [doc.get_embedding_text() for doc in docs]
-    embeddings = generate_hybrid_embeddings_batch(texts)
+    dense_embeddings = generate_dense_embeddings_batch(texts)
 
     return [
         PointStruct(
             id=uri_to_uuid(doc.id),
-            vector={"dense": dense, "sparse": sparse},
+            vector={"dense": dense, "sparse": bm25_document(text)},
             payload=doc.model_dump(mode="json"),
         )
-        for doc, (dense, sparse) in zip(docs, embeddings)
+        for doc, text, dense in zip(docs, texts, dense_embeddings)
     ]
 
 
 def _upload_batch(
     collection: str,
     batch: list[PointStruct],
-    chunk_size: int = 100,
-    max_retries: int = 3,
-    retry_delay: float = 5.0,
+    chunk_size: int = 50,
+    max_retries: int = 5,
+    retry_delay: float = 10.0,
 ) -> None:
     """Upload a batch of points to Qdrant in chunks with retry logic.
 

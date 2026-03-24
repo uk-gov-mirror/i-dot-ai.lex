@@ -19,7 +19,7 @@ Example usage:
     python bulk_search_qdrant.py --query "climate change" --collection legislation --limit 50
 
 Requirements:
-    uv pip install qdrant-client pandas openpyxl rich fastembed
+    uv pip install qdrant-client pandas openpyxl rich
 
     # Azure OpenAI credentials required (for embeddings):
     export AZURE_OPENAI_API_KEY=your_key
@@ -47,7 +47,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _console import console, print_header, print_summary, setup_logging
 
 try:
-    from lex.core.embeddings import generate_hybrid_embeddings
+    from lex.core.embeddings import bm25_document, generate_dense_embedding
     from lex.core.qdrant_client import get_qdrant_client
 except ImportError:
     print("ERROR: Could not import from lex.core")
@@ -107,9 +107,10 @@ def semantic_search(
     console.print(f"[cyan]Collection:[/cyan] {collection_name}")
     console.print(f"[cyan]Limit:[/cyan] {limit}")
 
-    # Generate hybrid embeddings (dense + sparse)
+    # Generate dense embedding (sparse BM25 computed server-side by Qdrant)
     console.print("[yellow]Generating embeddings...[/yellow]")
-    dense, sparse = generate_hybrid_embeddings(query)
+    dense = generate_dense_embedding(query)
+    sparse = bm25_document(query)
 
     # Hybrid search with DBSF fusion
     dense_limit = max(30, 3 * limit)

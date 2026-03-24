@@ -22,7 +22,7 @@ from backend.legislation.models import (
     LegislationSectionLookup,
     LegislationSectionSearch,
 )
-from lex.core.embeddings import generate_hybrid_embeddings_async
+from lex.core.embeddings import bm25_document, generate_dense_embedding_async
 from lex.core.qdrant_client import async_qdrant_client
 from lex.core.uri import normalise_legislation_uri
 from lex.legislation.models import (
@@ -370,7 +370,8 @@ async def qdrant_search_acts(
     filter_conditions = get_act_filters(type_selection, year_from, year_to)
     query_filter = Filter(must=filter_conditions) if filter_conditions else None
 
-    dense, sparse = await generate_hybrid_embeddings_async(search_query)
+    dense = await generate_dense_embedding_async(search_query)
+    sparse = bm25_document(search_query)
 
     dense_limit = max(30, 3 * size)
     sparse_limit = max(8, int(0.8 * size))
@@ -453,8 +454,8 @@ async def qdrant_search(
     )
 
     if is_semantic_search and search_query:
-        # Generate hybrid embeddings (async: runs dense + sparse concurrently off event loop)
-        dense, sparse = await generate_hybrid_embeddings_async(search_query)
+        dense = await generate_dense_embedding_async(search_query)
+        sparse = bm25_document(search_query)
 
         # Hybrid search with DBSF fusion (optimised via blind evaluation experiments)
         # DBSF (Distribution-Based Score Fusion) with dense-favouring ratio
@@ -478,7 +479,7 @@ async def qdrant_search(
 
     elif search_query:
         # Sparse-only (BM25) search for non-semantic queries
-        _, sparse = await generate_hybrid_embeddings_async(search_query)
+        sparse = bm25_document(search_query)
 
         results = await async_qdrant_client.query_points(
             collection_name=collection,

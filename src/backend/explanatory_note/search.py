@@ -13,7 +13,7 @@ from qdrant_client.models import (
 from backend.core.cache import cached_search
 from backend.core.filters import extract_enum_values
 from backend.explanatory_note.models import ExplanatoryNoteSearch
-from lex.core.embeddings import generate_hybrid_embeddings_async
+from lex.core.embeddings import bm25_document, generate_dense_embedding_async
 from lex.core.qdrant_client import async_qdrant_client
 from lex.core.uri import normalise_legislation_uri
 from lex.explanatory_note.models import (
@@ -68,7 +68,8 @@ async def search_explanatory_note(input: ExplanatoryNoteSearch) -> list[Explanat
 
     if input.query and input.query.strip():
         # Generate hybrid embeddings
-        dense, sparse = await generate_hybrid_embeddings_async(input.query)
+        dense = await generate_dense_embedding_async(input.query)
+        sparse = bm25_document(input.query)
 
         # Hybrid search with RRF fusion
         results = await async_qdrant_client.query_points(

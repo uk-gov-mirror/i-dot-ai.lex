@@ -146,24 +146,24 @@ def upload_documents(
                     texts.append(text)
                     doc_metadata.append((doc_id, doc))
 
-                # Generate embeddings in batch (no cache overhead)
-                from lex.core.embeddings import generate_hybrid_embeddings_batch
+                # Generate dense embeddings in batch (sparse is computed server-side by Qdrant)
+                from lex.core.embeddings import bm25_document, generate_dense_embeddings_batch
 
-                embeddings = generate_hybrid_embeddings_batch(texts, max_workers=25)
+                dense_embeddings = generate_dense_embeddings_batch(texts, max_workers=25)
 
-                # Create points with batch embeddings
+                # Create points with dense vectors + server-side BM25
                 points = []
-                for (doc_id, doc), (dense, sparse) in zip(doc_metadata, embeddings):
+                for (doc_id, doc), text, dense in zip(doc_metadata, texts, dense_embeddings):
                     # Convert URI to UUID for Qdrant compatibility
                     point_id = uri_to_uuid(doc_id)
 
                     # Convert Pydantic model to dict for Qdrant payload
                     payload = doc.model_dump() if hasattr(doc, "model_dump") else doc
 
-                    # Create point with both dense and sparse vectors
+                    # Create point with dense vector and server-side BM25 sparse vector
                     point = PointStruct(
                         id=point_id,
-                        vector={"dense": dense, "sparse": sparse},
+                        vector={"dense": dense, "sparse": bm25_document(text)},
                         payload=payload,  # All fields as metadata
                     )
                     points.append(point)

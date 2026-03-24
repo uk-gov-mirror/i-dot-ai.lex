@@ -27,7 +27,6 @@ import argparse
 import json
 import logging
 import os
-import random
 import sys
 import threading
 import time
@@ -48,7 +47,7 @@ from _console import console, print_header, print_summary, setup_logging
 
 from lex.amendment.models import Amendment
 from lex.core.document import uri_to_uuid
-from lex.core.embeddings import generate_hybrid_embeddings_batch
+from lex.core.embeddings import bm25_document, generate_dense_embeddings_batch
 from lex.core.qdrant_client import get_qdrant_client
 from lex.processing.amendment_explanations.explanation_generator import (
     fetch_provision_text,
@@ -250,14 +249,23 @@ def fetch_amendments_with_explanations(
     offset = None
 
     while True:
-        results, next_offset = qdrant_client.scroll(
-            collection_name=AMENDMENT_COLLECTION,
-            scroll_filter=explanation_filter,
-            limit=batch_size,
-            offset=offset,
-            with_payload=True,
-            with_vectors=False,
-        )
+        for attempt in range(5):
+            try:
+                results, next_offset = qdrant_client.scroll(
+                    collection_name=AMENDMENT_COLLECTION,
+                    scroll_filter=explanation_filter,
+                    limit=batch_size,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                break
+            except Exception as e:
+                if attempt == 4:
+                    raise
+                wait = 10 * (2**attempt)
+                logger.warning(f"Scroll failed ({e}), retrying in {wait}s...")
+                time.sleep(wait)
 
         if not results:
             break
@@ -476,26 +484,39 @@ def run_phase_2(
         logger.info(f"[DRY RUN] Would re-embed {len(amendments):,} amendments")
         return 0
 
-    uploaded = 0
+    # Resume from last progress if available
+    skip_to = 0
+    try:
+        with open(PROGRESS_FILE_PHASE_2) as f:
+            prev = json.load(f)
+        if prev.get("batch_size") == batch_size and prev.get("total_amendments") == len(amendments):
+            skip_to = prev.get("uploaded", 0)
+            logger.info(f"Resuming from {skip_to:,} (batch {skip_to // batch_size + 1})")
+        else:
+            logger.info("Previous progress incompatible (different batch_size or total), starting fresh")
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass
+
+    uploaded = skip_to
     start_time = time.time()
     total_batches = (len(amendments) + batch_size - 1) // batch_size
 
-    for batch_start in range(0, len(amendments), batch_size):
+    for batch_start in range(skip_to, len(amendments), batch_size):
         batch = amendments[batch_start : batch_start + batch_size]
         texts = [a.get_embedding_text() for a in batch]
 
         try:
-            embeddings = generate_hybrid_embeddings_batch(
+            dense_embeddings = generate_dense_embeddings_batch(
                 texts, max_workers=embedding_workers
             )
 
             points = []
-            for amendment, (dense, sparse) in zip(batch, embeddings):
+            for amendment, text, dense in zip(batch, texts, dense_embeddings):
                 point_id = str(uri_to_uuid(amendment.id))
                 points.append(
                     PointStruct(
                         id=point_id,
-                        vector={"dense": dense, "sparse": sparse},
+                        vector={"dense": dense, "sparse": bm25_document(text)},
                         payload=amendment.model_dump(mode="json"),
                     )
                 )
@@ -504,7 +525,8 @@ def run_phase_2(
             uploaded += len(points)
 
             elapsed = time.time() - start_time
-            rate = uploaded / elapsed * 60 if elapsed > 0 else 0
+            newly_uploaded = uploaded - skip_to
+            rate = newly_uploaded / elapsed * 60 if elapsed > 0 else 0
             remaining = len(amendments) - uploaded
             eta_minutes = remaining / rate if rate > 0 else 0
 
@@ -519,6 +541,7 @@ def run_phase_2(
                 "total_batches": total_batches,
                 "uploaded": uploaded,
                 "total_amendments": len(amendments),
+                "batch_size": batch_size,
                 "rate_per_min": round(rate, 1),
                 "eta_minutes": round(eta_minutes, 1),
                 "elapsed_seconds": round(elapsed),

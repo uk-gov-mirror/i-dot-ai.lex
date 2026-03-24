@@ -20,7 +20,7 @@ from backend.caselaw.models import (
 from backend.core.cache import cached_search
 from backend.core.filters import build_year_range_conditions, extract_enum_values
 from lex.caselaw.models import Caselaw, CaselawSection, CaselawSummary
-from lex.core.embeddings import generate_hybrid_embeddings_async
+from lex.core.embeddings import bm25_document, generate_dense_embedding_async
 from lex.core.qdrant_client import async_qdrant_client
 from lex.settings import CASELAW_COLLECTION, CASELAW_SECTION_COLLECTION, CASELAW_SUMMARY_COLLECTION
 
@@ -75,7 +75,8 @@ async def caselaw_search(input: CaselawSearch) -> dict:
     query_filter = Filter(must=filter_conditions) if filter_conditions else None
 
     if input.query and input.query.strip():
-        dense, sparse = await generate_hybrid_embeddings_async(input.query)
+        dense = await generate_dense_embedding_async(input.query)
+        sparse = bm25_document(input.query)
 
         if input.is_semantic_search:
             results = await async_qdrant_client.query_points(
@@ -127,7 +128,8 @@ async def caselaw_section_search(input: CaselawSectionSearch) -> list[CaselawSec
     query_filter = Filter(must=filter_conditions) if filter_conditions else None
 
     if input.query and input.query.strip():
-        dense, sparse = await generate_hybrid_embeddings_async(input.query)
+        dense = await generate_dense_embedding_async(input.query)
+        sparse = bm25_document(input.query)
 
         results = await async_qdrant_client.query_points(
             collection_name=CASELAW_SECTION_COLLECTION,
@@ -198,7 +200,8 @@ async def caselaw_summary_search(input: CaselawSummarySearch) -> dict:
     query_filter = Filter(must=filter_conditions) if filter_conditions else None
 
     if input.query and input.query.strip():
-        dense, sparse = await generate_hybrid_embeddings_async(input.query)
+        dense = await generate_dense_embedding_async(input.query)
+        sparse = bm25_document(input.query)
 
         if input.is_semantic_search:
             results = await async_qdrant_client.query_points(
