@@ -1,24 +1,20 @@
+import asyncio
 import logging
 import os
-import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from fastembed import SparseTextEmbedding
+
 from openai import APIConnectionError, APITimeoutError, AzureOpenAI, RateLimitError
-from qdrant_client.models import SparseVector
+from qdrant_client.models import Document
 
 from lex.settings import EMBEDDING_DEPLOYMENT, EMBEDDING_DIMENSIONS
 
 logger = logging.getLogger(__name__)
 
-# Initialize Azure OpenAI client
+# Initialise Azure OpenAI client
 _openai_client = None
 _openai_client_lock = threading.Lock()
-
-# Initialize FastEmbed BM25 model (lazy loading)
-_sparse_model = None
-_sparse_model_lock = threading.Lock()
 
 # Rate limiting config
 MAX_RETRIES = 10
@@ -32,6 +28,9 @@ DEFAULT_MAX_WORKERS = int(os.environ.get("EMBEDDING_MAX_WORKERS", "5"))
 # hit token limits. 100 is a safe default that balances throughput and reliability.
 DENSE_BATCH_CHUNK_SIZE = 100
 
+# Server-side BM25 model identifier for Qdrant inference
+BM25_MODEL = "Qdrant/bm25"
+
 
 def get_openai_client() -> AzureOpenAI:
     """Lazy load Azure OpenAI client (thread-safe)."""
@@ -40,7 +39,7 @@ def get_openai_client() -> AzureOpenAI:
         with _openai_client_lock:
             # Double-check after acquiring lock
             if _openai_client is None:
-                logger.info("Initializing Azure OpenAI client...")
+                logger.info("Initialising Azure OpenAI client...")
                 _openai_client = AzureOpenAI(
                     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
                     api_version="2024-02-01",
@@ -50,19 +49,6 @@ def get_openai_client() -> AzureOpenAI:
                 )
                 logger.info("Azure OpenAI client initialised")
     return _openai_client
-
-
-def get_sparse_model() -> SparseTextEmbedding:
-    """Lazy load sparse model to avoid initialization on import (thread-safe)."""
-    global _sparse_model
-    if _sparse_model is None:
-        with _sparse_model_lock:
-            # Double-check after acquiring lock
-            if _sparse_model is None:
-                logger.info("Initializing FastEmbed BM25 model...")
-                _sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
-                logger.info("FastEmbed BM25 model initialized")
-    return _sparse_model
 
 
 def generate_dense_embedding_with_retry(text: str, max_retries: int = MAX_RETRIES) -> list[float]:
@@ -208,118 +194,18 @@ def generate_dense_embeddings_batch(
     return all_results  # type: ignore[return-value]
 
 
-def generate_sparse_embedding(text: str) -> SparseVector:
+# --- Server-side BM25 helpers ---
+
+
+def bm25_document(text: str) -> Document:
+    """Create a Qdrant Document for server-side BM25 inference.
+
+    Qdrant computes BM25 sparse vectors server-side — no client-side
+    tokenisation needed. Works for both upserts and queries.
     """
-    Generate sparse BM25 embedding using FastEmbed.
-
-    Args:
-        text: Text to embed
-
-    Returns:
-        SparseVector with indices and values arrays
-
-    Example:
-        SparseVector(indices=[12, 45, 234], values=[0.8, 0.6, 0.4])
-    """
-    try:
-        model = get_sparse_model()
-        embeddings = list(model.embed([text]))
-
-        if not embeddings:
-            logger.warning("FastEmbed returned no embeddings")
-            return SparseVector(indices=[], values=[])
-
-        embedding = embeddings[0]
-
-        # Convert to SparseVector format Qdrant expects
-        return SparseVector(
-            indices=[int(idx) for idx in embedding.indices],
-            values=[float(val) for val in embedding.values],
-        )
-    except Exception as e:
-        logger.error(f"Failed to generate sparse embedding: {e}")
-        return SparseVector(indices=[], values=[])
+    return Document(text=text, model=BM25_MODEL)
 
 
-def generate_sparse_embeddings_batch(texts: list[str]) -> list[SparseVector]:
-    """
-    Generate sparse BM25 embeddings for multiple texts efficiently.
-
-    Args:
-        texts: List of texts to embed
-
-    Returns:
-        List of SparseVectors in same order as input texts
-    """
-    if not texts:
-        return []
-
-    try:
-        model = get_sparse_model()
-        embeddings = list(model.embed(texts))
-
-        return [
-            SparseVector(
-                indices=[int(idx) for idx in emb.indices], values=[float(val) for val in emb.values]
-            )
-            for emb in embeddings
-        ]
-    except Exception as e:
-        logger.error(f"Failed to generate sparse embeddings batch: {e}")
-        return [SparseVector(indices=[], values=[]) for _ in texts]
-
-
-def generate_hybrid_embeddings(text: str) -> tuple[list[float], SparseVector]:
-    """Generate both dense and sparse embeddings for hybrid search.
-
-    Args:
-        text: Text to embed
-
-    Returns:
-        Tuple of (dense_vector, sparse_vector)
-
-    Example:
-        ([0.1, 0.2, ...], SparseVector(indices=[12, 45], values=[0.8, 0.6]))
-    """
-    dense = generate_dense_embedding(text)
-    sparse = generate_sparse_embedding(text)
-    return dense, sparse
-
-
-async def generate_hybrid_embeddings_async(text: str) -> tuple[list[float], SparseVector]:
-    """Async version: runs dense (network) and sparse (CPU) concurrently off the event loop."""
-    import asyncio
-
-    dense, sparse = await asyncio.gather(
-        asyncio.to_thread(generate_dense_embedding, text),
-        asyncio.to_thread(generate_sparse_embedding, text),
-    )
-    return dense, sparse
-
-
-def generate_hybrid_embeddings_batch(
-    texts: list[str], max_workers: int | None = None, progress_callback=None
-) -> list[tuple[list[float], SparseVector]]:
-    """
-    Generate hybrid embeddings for multiple texts in parallel.
-
-    Args:
-        texts: List of texts to embed
-        max_workers: Number of concurrent workers (default from EMBEDDING_MAX_WORKERS env or 5)
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        List of (dense_vector, sparse_vector) tuples in same order as input
-    """
-    if not texts:
-        return []
-
-    if max_workers is None:
-        max_workers = DEFAULT_MAX_WORKERS
-
-    dense_embeddings = generate_dense_embeddings_batch(
-        texts, max_workers=max_workers, progress_callback=progress_callback
-    )
-    sparse_embeddings = generate_sparse_embeddings_batch(texts)
-
-    return list(zip(dense_embeddings, sparse_embeddings))
+async def generate_dense_embedding_async(text: str) -> list[float]:
+    """Async version: runs dense embedding off the event loop."""
+    return await asyncio.to_thread(generate_dense_embedding, text)

@@ -6,6 +6,7 @@ Only the collection name and payload indexes differ per domain.
 
 from qdrant_client.models import (
     Distance,
+    Modifier,
     PayloadSchemaType,
     ScalarQuantization,
     ScalarQuantizationConfig,
@@ -26,7 +27,7 @@ def build_collection_schema(
 
     All Lex collections share:
     - Dense vectors: 1024D OpenAI embeddings with cosine distance
-    - Sparse vectors: BM25 term weights, kept in memory
+    - Sparse vectors: BM25 with IDF modifier, computed server-side by Qdrant
     - INT8 scalar quantisation (75% memory saving, <1% accuracy loss)
     """
     return {
@@ -39,7 +40,8 @@ def build_collection_schema(
         },
         "sparse_vectors_config": {
             "sparse": SparseVectorParams(
-                index=SparseIndexParams(on_disk=False)
+                index=SparseIndexParams(on_disk=False),
+                modifier=Modifier.IDF,
             )
         },
         "payload_schema": payload_schema,
