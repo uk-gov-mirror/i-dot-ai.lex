@@ -620,6 +620,11 @@ def main() -> bool:
 
     setup_logging()
 
+    from lex.core.slack import notify_job_failure, notify_job_start, notify_job_success
+
+    notify_job_start("Export", {"collection": args.collection or "all", "mode": "APPLY" if args.apply else "DRY RUN"})
+    _export_start_time = time.time()
+
     print_header(
         "Bulk Export to Parquet",
         mode="APPLY" if args.apply else "DRY RUN",
@@ -724,9 +729,20 @@ def main() -> bool:
 
     print_summary("Export Complete", summary_stats, success=total_records > 0)
 
+    elapsed = int(time.time() - _export_start_time)
+    if total_records > 0:
+        notify_job_success("Export", summary_stats, duration_seconds=elapsed)
+    else:
+        notify_job_failure("Export", "All collections failed or empty", duration_seconds=elapsed)
+
     return total_records > 0
 
 
 if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+    try:
+        success = main()
+        sys.exit(0 if success else 1)
+    except Exception as e:
+        from lex.core.slack import notify_job_failure
+        notify_job_failure("Export", str(e))
+        raise

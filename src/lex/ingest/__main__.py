@@ -18,7 +18,9 @@ import argparse
 import asyncio
 import logging
 import sys
+import time
 
+from lex.core.slack import notify_job_failure, notify_job_start, notify_job_success
 from lex.ingest.orchestrator import (
     run_amendments_led_ingest,
     run_daily_ingest,
@@ -104,6 +106,14 @@ def main() -> int:
     logger = logging.getLogger(__name__)
     logger.info(f"Starting ingest: mode={args.mode}, limit={args.limit}")
 
+    job_name = f"Ingest ({args.mode})"
+    notify_job_start(job_name, {
+        "mode": args.mode,
+        "limit": args.limit or "none",
+        "years_back": getattr(args, "years_back", "N/A"),
+    })
+    start_time = time.time()
+
     try:
         if args.mode == "daily":
             stats = asyncio.run(
@@ -132,7 +142,9 @@ def main() -> int:
                 )
             )
 
+        elapsed = int(time.time() - start_time)
         logger.info(f"Ingest complete: {stats}")
+        notify_job_success(job_name, stats if isinstance(stats, dict) else {"result": str(stats)}, duration_seconds=elapsed)
         return 0
 
     except KeyboardInterrupt:
@@ -140,7 +152,9 @@ def main() -> int:
         return 130
 
     except Exception as e:
+        elapsed = int(time.time() - start_time)
         logger.error(f"Ingest failed: {e}", exc_info=True)
+        notify_job_failure(job_name, str(e), duration_seconds=elapsed)
         return 1
 
 
