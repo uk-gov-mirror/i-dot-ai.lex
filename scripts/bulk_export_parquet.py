@@ -46,6 +46,7 @@ import sys
 import tempfile
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -402,66 +403,78 @@ def export_collection(
         temp_path = Path(temp_dir)
 
         if config["split_by_year"]:
-            # Export by year
+            # Export by year — parallel with per-thread Qdrant clients
+            MAX_YEAR_WORKERS = 4
+
             years = get_years_in_collection(qdrant_client, collection_name, config["year_field"])
             year_range = f"{min(years)} - {max(years)}" if years else "none"
             logger.info(f"  Found years: {year_range} ({len(years)} years)")
+            logger.info(f"  Processing {MAX_YEAR_WORKERS} years in parallel")
 
-            for year in years:
-                logger.info(f"\n  Year {year}...")
-
+            def _export_year(year: int) -> tuple[int, Path | None, int]:
+                """Export a single year in its own thread with a fresh Qdrant client."""
+                thread_client = get_qdrant_client()
                 filename = f"{year}.parquet"
                 local_path = temp_path / filename
-
                 try:
                     record_count = payloads_to_parquet_streaming(
-                        qdrant_client,
+                        thread_client,
                         collection_name,
                         local_path,
                         batch_size=batch_size,
                         year_filter=year,
                         year_field=config["year_field"],
                     )
+                    return year, local_path, record_count
                 except Exception as e:
                     logger.error(f"    Failed year {year}: {e}")
-                    continue
+                    return year, None, 0
 
-                if record_count == 0:
-                    logger.info(f"    No records for year {year}")
-                    continue
+            with ThreadPoolExecutor(max_workers=MAX_YEAR_WORKERS) as executor:
+                futures = {executor.submit(_export_year, year): year for year in years}
 
-                file_size = local_path.stat().st_size
-                size_mb = file_size / 1024 / 1024
-                logger.info(f"    {record_count:,} records, {size_mb:.1f} MB")
+                for future in as_completed(futures):
+                    year, local_path, record_count = future.result()
 
-                if blob_service_client:
-                    # Upload to archive
-                    archive_blob = f"archive/{date_str}/{collection_name}/{year}.parquet"
-                    upload_to_blob(
-                        blob_service_client, container_name, local_path, archive_blob, dry_run
-                    )
+                    if record_count == 0 or local_path is None:
+                        if local_path is None:
+                            logger.warning(f"    Year {year} export failed")
+                        else:
+                            logger.info(f"    No records for year {year}")
+                        continue
 
-                    # Upload to latest
-                    latest_blob = f"latest/{collection_name}/{year}.parquet"
-                    url = upload_to_blob(
-                        blob_service_client, container_name, local_path, latest_blob, dry_run
-                    )
+                    file_size = local_path.stat().st_size
+                    size_mb = file_size / 1024 / 1024
+                    logger.info(f"    Year {year}: {record_count:,} records, {size_mb:.1f} MB")
 
-                    stats["files"].append(
-                        {
-                            "name": f"{collection_name}/{year}.parquet",
-                            "url": url,
-                            "records": record_count,
-                            "bytes": file_size,
-                            "year": year,
-                        }
-                    )
+                    if blob_service_client:
+                        # Upload to archive
+                        archive_blob = f"archive/{date_str}/{collection_name}/{year}.parquet"
+                        upload_to_blob(
+                            blob_service_client, container_name, local_path, archive_blob, dry_run
+                        )
 
-                stats["total_records"] += record_count
-                stats["total_bytes"] += file_size
+                        # Upload to latest
+                        latest_blob = f"latest/{collection_name}/{year}.parquet"
+                        url = upload_to_blob(
+                            blob_service_client, container_name, local_path, latest_blob, dry_run
+                        )
 
-                # Cleanup between years
-                gc.collect()
+                        stats["files"].append(
+                            {
+                                "name": f"{collection_name}/{year}.parquet",
+                                "url": url,
+                                "records": record_count,
+                                "bytes": file_size,
+                                "year": year,
+                            }
+                        )
+
+                    stats["total_records"] += record_count
+                    stats["total_bytes"] += file_size
+
+                    # Cleanup after each year completes
+                    gc.collect()
 
         else:
             # Single file export
@@ -623,7 +636,10 @@ def main() -> bool:
 
     from lex.core.slack import notify_job_failure, notify_job_start, notify_job_success
 
-    notify_job_start("Export", {"collection": args.collection or "all", "mode": "APPLY" if args.apply else "DRY RUN"})
+    notify_job_start(
+        "Export",
+        {"collection": args.collection or "all", "mode": "APPLY" if args.apply else "DRY RUN"},
+    )
     _export_start_time = time.time()
 
     print_header(
@@ -747,5 +763,6 @@ if __name__ == "__main__":
         sys.exit(0 if success else 1)
     except Exception as e:
         from lex.core.slack import notify_job_failure
+
         notify_job_failure("Export", str(e))
         raise

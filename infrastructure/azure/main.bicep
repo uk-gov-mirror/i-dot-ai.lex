@@ -356,7 +356,7 @@ resource exportJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      replicaTimeout: 21600  // 6 hour timeout for 7.3M documents
+      replicaTimeout: 86400  // 24 hour timeout for 8.4M documents
       replicaRetryLimit: 2
       registries: [
         {
